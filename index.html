@@ -31,10 +31,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .screen-watermark span{transform:rotate(-24deg);white-space:pre-line}
 .page-image{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
 .overlay{position:absolute;inset:0;z-index:2;pointer-events:none}
-.student-name{position:absolute;pointer-events:auto;border:1px solid transparent;outline:0;background:transparent;font:700 18px "Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);text-align:right;direction:rtl;padding:5px 12px 0;cursor:text;caret-color:var(--accent);border-radius:2px}
+.student-name{position:absolute;pointer-events:auto;border:1px solid transparent;outline:0;background:transparent;font:700 16px "Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);text-align:right;direction:rtl;padding:5px 10px 0;cursor:text;caret-color:var(--accent);border-radius:2px}
 .student-name:hover{background:rgba(20,116,111,.025);border-color:rgba(20,116,111,.10)}
 .student-name:focus{background:rgba(255,255,255,.18);border-color:rgba(20,116,111,.22);box-shadow:inset 0 -1px 0 rgba(20,116,111,.28)}
-.student-name::placeholder{color:rgba(23,32,42,.42);font-weight:700}
+.student-name::placeholder{color:rgba(23,32,42,.62);font-weight:700;font-size:13px}
 .score-box,.feedback-box,.signature-box{position:absolute;pointer-events:none;text-align:center;font-weight:800}
 .score-box{color:#d00000;font-family:"Segoe Print","Comic Sans MS","Arial",sans-serif;font-size:34px;line-height:1;direction:ltr;transform:none;text-shadow:.25px .25px 0 rgba(120,0,0,.18);display:grid;place-items:center;text-align:center;font-weight:900}
 .feedback-box{display:grid;place-items:center;color:#036947;font:800 52px "Aldhabi","Arabic Typesetting","Segoe Print","Comic Sans MS",cursive;line-height:1.05;background:transparent;transform:rotate(-3deg);text-shadow:.5px .5px 0 rgba(4,80,60,.22)}
@@ -85,7 +85,7 @@ body.secure-locked .actions button,body.secure-locked .timer{opacity:.45;pointer
 <header class="topbar">
   <div>
     <h1>اختبار مادة الرياضيات للصف الثالث الثانوي - الفترة الثانية</h1>
-    <div class="credit">تصميم عبدالرحمن الثقفي</div>
+    <div class="credit">تصميم أ.عبد الرحمن عمري الثقفي</div>
   </div>
   <div class="actions">
     <div class="timer" id="timer">60:00</div>
@@ -93,7 +93,7 @@ body.secure-locked .actions button,body.secure-locked .timer{opacity:.45;pointer
     <button class="control" id="exportBtn" type="button" disabled>تصدير PDF</button>
     <button class="control" id="clearBtn" type="button">مسح</button>
   </div>
-  <div class="hint" id="hint">اختر إجابة لكل سؤال حتى يتم تفعيل التصحيح. التعزيز لا يتضمن اسم الطالب.</div>
+  <div class="hint" id="hint">اختر إجابة لكل سؤال حتى يتم تفعيل التصحيح.</div>
 </header>
 <section class="paper-shell" id="papers">
   <div class="paper" data-page="1" style="aspect-ratio:1191/1684">
@@ -419,7 +419,7 @@ function selectAnswer(q,choice){
 function updateCheckState(){
   const complete=Array.from({length:20},(_,i)=>answers[i+1]).every(Boolean);
   checkBtn.disabled=!complete;
-  hint.textContent=complete?'جميع الإجابات مكتملة. يمكنك التصحيح الآن.':'اختر إجابة لكل سؤال حتى يتم تفعيل التصحيح. التعزيز لا يتضمن اسم الطالب.';
+  hint.textContent=complete?'جميع الإجابات مكتملة. يمكنك التصحيح الآن.':'اختر إجابة لكل سؤال حتى يتم تفعيل التصحيح.';
 }
 function grade(){
   const priorAttempt=readAttempt();

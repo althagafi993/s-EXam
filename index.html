@@ -12,6 +12,8 @@
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
 body{margin:0;min-height:100vh;background:#eef3f2;color:var(--ink);font-family:"Segoe UI",Tahoma,Arial,sans-serif}
+body.exam-secure,body.exam-secure *{user-select:none;-webkit-user-select:none}
+body.exam-secure input,body.exam-secure select{user-select:text;-webkit-user-select:text}
 .app{width:min(100%,1120px);margin:0 auto;padding:14px}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 h1{margin:0;font-size:18px;line-height:1.4}
@@ -50,6 +52,14 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .tf-select:focus{box-shadow:0 0 0 1px rgba(20,116,111,.25)}
 .tf-select.correct{background:rgba(4,120,87,.13);color:#047857}
 .tf-select.wrong{background:rgba(185,28,28,.12);color:#b91c1c}
+.secure-panel{position:fixed;inset:0;z-index:9999;display:none;place-items:center;padding:18px;background:rgba(15,23,42,.78);backdrop-filter:blur(8px);text-align:center}
+.secure-panel.show{display:grid}
+.secure-card{width:min(92vw,520px);background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:0 22px 70px rgba(15,23,42,.28)}
+.secure-card h2{margin:0 0 10px;font-size:22px;color:#b91c1c}
+.secure-card p{margin:0 0 14px;line-height:1.8;color:#334155;font-weight:700}
+.secure-card button{border:0;border-radius:8px;background:var(--accent);color:#fff;font:800 15px "Segoe UI",Tahoma,Arial,sans-serif;padding:10px 18px;cursor:pointer}
+body.secure-paused .paper-shell,body.secure-locked .paper-shell{filter:blur(12px);opacity:.12;pointer-events:none}
+body.secure-locked .actions button,body.secure-locked .timer{opacity:.45;pointer-events:none}
 @media(max-width:640px){.app{padding:8px}h1{font-size:15px}.paper{width:100%}.feedback-box{font-size:40px}}
 @media print {
   @page{size:A4 portrait;margin:0}
@@ -60,6 +70,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
   .paper{width:100%;box-shadow:none;page-break-inside:avoid;break-inside:avoid}
   .answer-zone,.tf-select{pointer-events:none}
   .student-name{border:0}
+  .secure-panel{display:none!important}
+  body.secure-paused .paper-shell,body.secure-locked .paper-shell{filter:none;opacity:1;pointer-events:auto}
+  body:not(.print-allowed) .paper-shell{display:none!important}
+  body:not(.print-allowed)::before{content:"الطباعة متاحة فقط من زر تصدير PDF بعد التصحيح.";display:grid;place-items:center;height:100vh;font:800 24px "Segoe UI",Tahoma,Arial,sans-serif;color:#b91c1c;text-align:center;padding:24px}
 }
 </style>
 </head>
@@ -94,6 +108,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
   </div>
 </section>
 </main>
+<div class="secure-panel" id="securePanel" role="alertdialog" aria-modal="true" aria-labelledby="secureTitle">
+  <div class="secure-card">
+    <h2 id="secureTitle">تنبيه أمان</h2>
+    <p id="secureMessage">تم إخفاء ورقة الاختبار مؤقتًا لحماية الأسئلة.</p>
+    <button id="secureResumeBtn" type="button">متابعة الاختبار</button>
+  </div>
+</div>
 <script>
 const PAGE = {w:1191,h:1684};
 const CHOICES = ['أ','ب','ج','د'];
@@ -110,6 +131,17 @@ const overlays = {1:document.getElementById('overlay1'),2:document.getElementByI
 const checkBtn=document.getElementById('checkBtn'), exportBtn=document.getElementById('exportBtn'), clearBtn=document.getElementById('clearBtn');
 const hint=document.getElementById('hint'), scoreBox=document.getElementById('scoreBox'), feedbackBox=document.getElementById('feedbackBox'), signatureBox=document.getElementById('signatureBox');
 const studentName=document.getElementById('studentName');
+const TEACHER_EMAIL='althagafi993@gmail.com';
+const SUBMISSION_WEB_APP_URL='https://script.google.com/macros/s/AKfycbwE2F4imolKgGR7Kgom_yMyROD4RYXuBYoeM8Mtts6Wjiq3EFmLRO7hIyw9uwEPrpZZ_w/exec';
+const SUBMISSION_TOKEN='math_exam_1447_period2';
+const ATTEMPT_LOCK_KEY='math_exam_1447_period2_attempt_v1';
+const SECURITY_EVENT_KEY='math_exam_1447_period2_security_events';
+const securePanel=document.getElementById('securePanel'), secureMessage=document.getElementById('secureMessage'), secureResumeBtn=document.getElementById('secureResumeBtn');
+let lastResult=null;
+let exportInProgress=false;
+let securityPauseUntil=0;
+let pendingHiddenWarning=false;
+document.body.classList.add('exam-secure');
 
 function pct(v,max){return (v/max*100)+'%'}
 function place(el, r){el.style.left=pct(r.x,PAGE.w);el.style.top=pct(r.y,PAGE.h);el.style.width=pct(r.w,PAGE.w);el.style.height=pct(r.h,PAGE.h)}
@@ -156,7 +188,164 @@ for(let q=15;q<=20;q++){
   addTfSelect(2,q,{x:184,y:tfRows[q].y+13,w:62,h:24});
 }
 
+function storageGet(key){
+  try{return localStorage.getItem(key)}catch(e){return null}
+}
+function storageSet(key,value){
+  try{localStorage.setItem(key,value)}catch(e){}
+}
+function readAttempt(){
+  const raw=storageGet(ATTEMPT_LOCK_KEY);
+  if(!raw)return null;
+  try{return JSON.parse(raw)}catch(e){return {submittedAt:raw}}
+}
+function recordSecurityEvent(reason){
+  const item={reason,at:new Date().toISOString(),student:(studentName.value||'').trim()};
+  let events=[];
+  try{events=JSON.parse(storageGet(SECURITY_EVENT_KEY)||'[]')}catch(e){events=[]}
+  events.push(item);
+  storageSet(SECURITY_EVENT_KEY,JSON.stringify(events.slice(-30)));
+}
+function showSecurityWarning(message,locked=false){
+  secureMessage.textContent=message;
+  securePanel.classList.add('show');
+  secureResumeBtn.style.display=locked?'none':'inline-block';
+  document.body.classList.toggle('secure-locked',locked);
+  document.body.classList.toggle('secure-paused',!locked);
+}
+function resumeSecurityWarning(){
+  document.body.classList.remove('secure-paused');
+  securePanel.classList.remove('show');
+}
+function warnSecurity(reason,message){
+  if(Date.now()<securityPauseUntil || document.body.classList.contains('secure-locked'))return;
+  recordSecurityEvent(reason);
+  showSecurityWarning(message||'تم إيقاف عرض الاختبار مؤقتًا بسبب محاولة قد تؤثر على أمان الاختبار.');
+}
+function freezeSubmittedAttempt(){
+  document.querySelectorAll('.answer-zone,.tf-select').forEach(el=>{el.disabled=true;el.style.pointerEvents='none'});
+  studentName.readOnly=true;
+  checkBtn.disabled=true;
+  clearBtn.disabled=true;
+}
+function lockExistingAttempt(attempt){
+  freezeSubmittedAttempt();
+  exportBtn.disabled=true;
+  const dateText=attempt&&attempt.submittedAt?new Intl.DateTimeFormat('ar-SA-u-ca-gregory',{dateStyle:'short',timeStyle:'short'}).format(new Date(attempt.submittedAt)):'سابقًا';
+  hint.textContent='تم تسجيل محاولة سابقة لهذا الاختبار، ولا يمكن حل النموذج مرة أخرى من نفس الجهاز.';
+  showSecurityWarning('تم تسجيل محاولة سابقة لهذا الاختبار بتاريخ '+dateText+'. لا يمكن إعادة حل النموذج من نفس الجهاز.',true);
+}
+function buildSubmissionBody(trigger){
+  const attempt=lastResult||readAttempt()||{};
+  const student=(studentName.value||attempt.student||'غير مذكور').trim()||'غير مذكور';
+  const score=scoreBox.textContent||attempt.score||'غير مصحح';
+  const submittedAt=attempt.submittedAt||new Date().toISOString();
+  const rows=Array.from({length:20},(_,i)=>{
+    const q=i+1;
+    const selected=answers[q]||(attempt.answers&&attempt.answers[q])||'-';
+    const right=ANSWER_KEY[q];
+    const mark=selected===right?'صحيح':'خطأ';
+    return q+'. '+selected+' | الصحيحة: '+right+' | '+mark;
+  }).join('\n');
+  return [
+    'السلام عليكم،',
+    '',
+    'تم استلام نتيجة نموذج اختبار الرياضيات.',
+    'الإجراء: '+trigger,
+    'اسم الطالب: '+student,
+    'الدرجة: '+score+' من 20',
+    'وقت الإرسال: '+new Intl.DateTimeFormat('ar-SA-u-ca-gregory',{dateStyle:'full',timeStyle:'short'}).format(new Date(submittedAt)),
+    '',
+    'الإجابات:',
+    rows,
+    '',
+    'ملاحظة: في حال استخدام تصدير PDF، يرجى إرفاق ملف PDF الناتج مع هذه الرسالة قبل الإرسال.'
+  ].join('\n');
+}
+function buildSubmissionPayload(trigger){
+  const attempt=lastResult||readAttempt()||{};
+  const submittedAt=attempt.submittedAt||new Date().toISOString();
+  const answerRows=Array.from({length:20},(_,i)=>{
+    const q=i+1;
+    const selected=answers[q]||(attempt.answers&&attempt.answers[q])||'';
+    const right=ANSWER_KEY[q];
+    return {question:q,selected,right,correct:selected===right};
+  });
+  return {
+    token:SUBMISSION_TOKEN,
+    trigger,
+    teacherEmail:TEACHER_EMAIL,
+    student:(studentName.value||attempt.student||'غير مذكور').trim()||'غير مذكور',
+    score:Number(scoreBox.textContent||attempt.score||0),
+    total:20,
+    feedback:feedbackBox.textContent||'',
+    submittedAt,
+    answers:answerRows,
+    securityEvents:attempt.securityEvents||[]
+  };
+}
+function openSubmissionEmailFallback(trigger){
+  const student=(studentName.value||'طالب').trim()||'طالب';
+  const subject='نتيجة اختبار الرياضيات - '+student;
+  const body=buildSubmissionBody(trigger);
+  const href='mailto:'+encodeURIComponent(TEACHER_EMAIL)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+  securityPauseUntil=Date.now()+7000;
+  const link=document.createElement('a');
+  link.href=href;
+  link.style.display='none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  hint.textContent='تم تجهيز رسالة البريد إلى المعلم. تأكد من إرسال الرسالة من تطبيق البريد، وأرفق ملف PDF إذا صدرته.';
+}
+function markSubmissionSent(){
+  const attempt=lastResult||readAttempt();
+  if(!attempt)return;
+  attempt.submissionSent=true;
+  attempt.submissionSentAt=new Date().toISOString();
+  lastResult=attempt;
+  storageSet(ATTEMPT_LOCK_KEY,JSON.stringify(attempt));
+}
+function submitToTeacher(trigger){
+  const attempt=lastResult||readAttempt();
+  if(attempt&&attempt.submissionSent){
+    hint.textContent='تم إرسال النتيجة سابقًا إلى بريد المعلم. لا يحتاج الطالب إلى إدخال بريد.';
+    return;
+  }
+  const url=SUBMISSION_WEB_APP_URL.trim();
+  if(!url || url==='ضع_رابط_Google_Apps_Script_هنا'){
+    openSubmissionEmailFallback(trigger);
+    return;
+  }
+  hint.textContent='جاري إرسال النتيجة إلى بريد المعلم...';
+  const payload=buildSubmissionPayload(trigger);
+  fetch(url,{
+    method:'POST',
+    mode:'no-cors',
+    cache:'no-store',
+    keepalive:true,
+    body:JSON.stringify(payload)
+  }).then(()=>{
+    markSubmissionSent();
+    hint.textContent='تم إرسال النتيجة إلى بريد المعلم كملف PDF. لا يحتاج الطالب إلى إدخال بريد.';
+  }).catch(()=>{
+    hint.textContent='تعذر الإرسال التلقائي. سيتم فتح رسالة بريد احتياطية إلى المعلم.';
+    openSubmissionEmailFallback(trigger);
+  });
+}
+function saveSubmittedAttempt(correct){
+  lastResult={
+    student:(studentName.value||'').trim(),
+    score:correct,
+    answers:{...answers},
+    submittedAt:new Date().toISOString(),
+    securityEvents:(()=>{try{return JSON.parse(storageGet(SECURITY_EVENT_KEY)||'[]')}catch(e){return []}})()
+  };
+  storageSet(ATTEMPT_LOCK_KEY,JSON.stringify(lastResult));
+}
+
 function selectAnswer(q,choice){
+  if(readAttempt())return;
   if(choice){answers[q]=choice}else{delete answers[q]}
   document.querySelectorAll(`[data-question="${q}"]`).forEach(b=>{
     if(b.tagName==='SELECT'){b.classList.remove('correct','wrong')}
@@ -170,6 +359,8 @@ function updateCheckState(){
   hint.textContent=complete?'جميع الإجابات مكتملة. يمكنك التصحيح الآن.':'اختر إجابة لكل سؤال حتى يتم تفعيل التصحيح. التعزيز لا يتضمن اسم الطالب.';
 }
 function grade(){
+  const priorAttempt=readAttempt();
+  if(priorAttempt){lockExistingAttempt(priorAttempt);return;}
   if(checkBtn.disabled)return;
   let correct=0;
   for(let q=1;q<=20;q++){
@@ -193,6 +384,9 @@ function grade(){
   signatureBox.textContent=signature();
   hint.textContent='تم التصحيح وظهرت الدرجة والتعزيز دون اسم الطالب.';
   exportBtn.disabled=false;
+  saveSubmittedAttempt(correct);
+  freezeSubmittedAttempt();
+  submitToTeacher('تصحيح النموذج');
 }
 function feedback(points){
   if(points>=18)return 'مبدع ومتميز';
@@ -205,6 +399,8 @@ function signature(){
   return new Intl.DateTimeFormat('ar-SA-u-ca-gregory',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 }
 function clearAnswers(){
+  const priorAttempt=readAttempt();
+  if(priorAttempt){lockExistingAttempt(priorAttempt);return;}
   for(const k of Object.keys(answers))delete answers[k];
   document.querySelectorAll('.answer-zone').forEach(b=>b.classList.remove('selected','correct','wrong'));
   document.querySelectorAll('.tf-select').forEach(s=>{s.value='';s.classList.remove('correct','wrong');s.title='';});
@@ -216,8 +412,61 @@ function startTimer(){
   const timer=document.getElementById('timer'); const started=Date.now(); const total=55*60*1000;
   setInterval(()=>{const left=Math.max(0,total-(Date.now()-started)); const m=Math.floor(left/60000), s=Math.floor((left%60000)/1000); timer.textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');},1000);
 }
-checkBtn.addEventListener('click',grade); clearBtn.addEventListener('click',clearAnswers); exportBtn.addEventListener('click',()=>setTimeout(()=>window.print(),120));
+function exportPdfAndEmail(){
+  if(exportBtn.disabled)return;
+  if(readAttempt()&&!lastResult){lockExistingAttempt(readAttempt());return;}
+  exportInProgress=true;
+  securityPauseUntil=Date.now()+12000;
+  setTimeout(()=>{
+    document.body.classList.add('print-allowed');
+    window.print();
+    setTimeout(()=>submitToTeacher('تصدير PDF'),700);
+    setTimeout(()=>{exportInProgress=false;document.body.classList.remove('print-allowed')},10000);
+  },120);
+}
+function installSecurityGuards(){
+  secureResumeBtn.addEventListener('click',resumeSecurityWarning);
+  document.addEventListener('contextmenu',e=>{e.preventDefault();warnSecurity('contextmenu','تم منع القائمة المختصرة لحماية محتوى الاختبار.');});
+  document.addEventListener('copy',e=>{e.preventDefault();warnSecurity('copy','تم منع نسخ محتوى الاختبار.');});
+  document.addEventListener('cut',e=>{e.preventDefault();warnSecurity('cut','تم منع قص محتوى الاختبار.');});
+  document.addEventListener('dragstart',e=>e.preventDefault());
+  document.addEventListener('keydown',e=>{
+    const key=(e.key||'').toLowerCase();
+    const command=e.ctrlKey||e.metaKey;
+    const developerShortcut=(e.ctrlKey&&e.shiftKey&&['i','j','c'].includes(key))||key==='f12';
+    const blockedCommand=command&&['p','s','u','c','x'].includes(key);
+    const printScreen=e.key==='PrintScreen';
+    if(developerShortcut||blockedCommand||printScreen){
+      e.preventDefault();
+      e.stopPropagation();
+      if(printScreen&&navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText('').catch(()=>{});}
+      warnSecurity(printScreen?'printscreen':'shortcut','تم منع اختصار قد يستخدم للنسخ أو الطباعة أو التقاط الشاشة. سيستمر الاختبار بعد الضغط على متابعة.');
+    }
+  },true);
+  document.addEventListener('visibilitychange',()=>{
+    if(Date.now()<securityPauseUntil)return;
+    if(document.hidden){pendingHiddenWarning=true;document.body.classList.add('secure-paused');}
+    else if(pendingHiddenWarning){pendingHiddenWarning=false;warnSecurity('visibilitychange','تم إخفاء الورقة لأن صفحة الاختبار فقدت التركيز.');}
+  });
+  window.addEventListener('blur',()=>{
+    if(Date.now()<securityPauseUntil)return;
+    pendingHiddenWarning=true;
+    setTimeout(()=>{if(!document.hasFocus()&&Date.now()>=securityPauseUntil)document.body.classList.add('secure-paused');},250);
+  });
+  window.addEventListener('focus',()=>{
+    if(Date.now()<securityPauseUntil)return;
+    if(pendingHiddenWarning){pendingHiddenWarning=false;warnSecurity('blur','تم إخفاء الورقة لأن نافذة الاختبار فقدت التركيز.');}
+  });
+  window.addEventListener('beforeprint',()=>{
+    if(!exportInProgress)warnSecurity('print','لا يمكن طباعة الاختبار إلا من زر تصدير PDF بعد التصحيح.');
+  });
+  window.addEventListener('afterprint',()=>{exportInProgress=false;document.body.classList.remove('print-allowed');});
+}
+checkBtn.addEventListener('click',grade); clearBtn.addEventListener('click',clearAnswers); exportBtn.addEventListener('click',exportPdfAndEmail);
+installSecurityGuards();
 startTimer(); updateCheckState();
+const existingAttempt=readAttempt();
+if(existingAttempt)lockExistingAttempt(existingAttempt);
 </script>
 </body>
 </html>
